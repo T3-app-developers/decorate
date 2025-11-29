@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>3D House Decorating – Babylon.js Prototype</title>
+  <title>Decorate Deluxe – Babylon.js House Builder</title>
   <style>
     html, body {
       margin: 0;
@@ -10,53 +10,147 @@
       overflow: hidden;
       width: 100%;
       height: 100%;
-      background: #000;
-      font-family: system-ui, sans-serif;
-      color: #fff;
+      background: radial-gradient(circle at 20% 20%, #0f172a, #020617 60%);
+      font-family: "Inter", system-ui, sans-serif;
+      color: #e2e8f0;
     }
+
     #renderCanvas {
       width: 100%;
       height: 100%;
       touch-action: none;
       display: block;
     }
+
     #hud {
       position: fixed;
-      top: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.4);
-      padding: 8px 12px;
-      border-radius: 6px;
+      top: 14px;
+      left: 14px;
+      background: rgba(2, 6, 23, 0.7);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      box-shadow: 0 12px 40px rgba(15, 23, 42, 0.45);
+      padding: 14px 16px;
+      border-radius: 10px;
       font-size: 14px;
-      max-width: 320px;
+      max-width: 420px;
+      backdrop-filter: blur(8px);
     }
-    #hud strong {
-      display: block;
-      margin-bottom: 4px;
+
+    #hud h1 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      letter-spacing: 0.02em;
+      color: #f8fafc;
     }
+
+    .subtitle {
+      margin: 0 0 10px;
+      color: #94a3b8;
+      font-size: 13px;
+    }
+
+    .stat-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .stat {
+      background: rgba(148, 163, 184, 0.08);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      padding: 6px 8px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 110px;
+    }
+
+    .stat .label {
+      color: #cbd5e1;
+    }
+
+    .stat .value {
+      color: #a5b4fc;
+      font-weight: 600;
+    }
+
     #interactionHint {
       margin-top: 6px;
-      color: #ffd66b;
+      color: #fbbf24;
+      font-weight: 600;
     }
+
     #marketHint {
       margin-top: 6px;
-      color: #6bffb2;
+      color: #34d399;
+      font-weight: 600;
+    }
+
+    #themeInfo {
+      margin-top: 4px;
+      color: #e2e8f0;
+    }
+
+    #questList {
+      margin-top: 8px;
+      padding: 8px;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      color: #cbd5e1;
+    }
+
+    #log {
+      margin-top: 8px;
+      padding: 8px;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 8px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .controls {
+      margin-top: 6px;
+      color: #cbd5e1;
+      line-height: 1.4;
     }
   </style>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
   <div id="hud">
-    <strong>3D House Decorating Prototype (Babylon.js)</strong>
-    <div id="roomInfo">Room: Outside</div>
-    <div>Controls: WASD to move, mouse to look, Space to jump.</div>
-    <div>Press <b>E</b> to interact (doors, stairs, stall, sofa, oven).</div>
-    <div>Press <b>M</b> to mark current room "Done" (unlock next room/stairs).</div>
+    <h1>Decorate Deluxe</h1>
+    <p class="subtitle">A richer house-decorating prototype built with Babylon.js</p>
+
+    <div class="stat-row">
+      <div class="stat"><span class="label">Room</span><span class="value" id="roomInfo">Outside</span></div>
+      <div class="stat"><span class="label">Theme</span><span class="value" id="themeLabel">Outside Yard</span></div>
+      <div class="stat"><span class="label">Coins</span><span class="value" id="coinStat">320</span></div>
+      <div class="stat"><span class="label">Style</span><span class="value" id="styleStat">0</span></div>
+      <div class="stat"><span class="label">Daylight</span><span class="value" id="timeStat">Dawn</span></div>
+    </div>
+
+    <div id="themeInfo">Decorate each room to satisfy its mood requirements and earn bonuses.</div>
     <div id="interactionHint"></div>
     <div id="marketHint"></div>
+
+    <div id="questList"></div>
+
+    <div class="controls">
+      <strong>Controls</strong><br />
+      WASD to move · Mouse to look · Space to jump<br />
+      E to interact (doors, stairs, stall, sofa, oven) · M to evaluate current room<br />
+      1-7 to select catalog item while market is open · Q/R to rotate selection · P to repaint current room
+    </div>
+
+    <div id="log"></div>
   </div>
 
-  <!-- Babylon.js CDN -->
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script>
     const canvas = document.getElementById("renderCanvas");
@@ -64,33 +158,73 @@
 
     // Simple DOM HUD references
     const roomInfoEl = document.getElementById("roomInfo");
+    const themeLabelEl = document.getElementById("themeLabel");
+    const themeInfoEl = document.getElementById("themeInfo");
     const interactionHintEl = document.getElementById("interactionHint");
     const marketHintEl = document.getElementById("marketHint");
+    const coinStatEl = document.getElementById("coinStat");
+    const styleStatEl = document.getElementById("styleStat");
+    const timeStatEl = document.getElementById("timeStat");
+    const logEl = document.getElementById("log");
+    const questListEl = document.getElementById("questList");
 
     // Room indices: -1 = outside, 0–3 = ground floor rooms, 4–6 = upstairs rooms
     let currentRoomIndex = -1;
 
-    // Room progression state
     const NUM_ROOMS = 7;
     const roomStates = [];
-    for (let i = 0; i < NUM_ROOMS; i++) {
-      roomStates.push({
-        done: false,
-        unlocked: i === 0   // first room unlocked by default
-      });
-    }
+    const ROOM_THEMES = [
+      { name: "Living Room", mood: "Warm Welcome", requiredTags: ["seating", "lighting"], tip: "At least one sofa or chair and a lamp." },
+      { name: "Dining Room", mood: "Gather & Feast", requiredTags: ["surface", "lighting"], tip: "Tables love companions like plants or rugs." },
+      { name: "Kitchen", mood: "Chef's Corner", requiredTags: ["appliance", "surface"], tip: "Place ovens and counters; lights make it shine." },
+      { name: "Studio", mood: "Creative Lounge", requiredTags: ["seating", "plant"], tip: "Mix soft seats with greenery for calm focus." },
+      { name: "Bedroom", mood: "Cozy Retreat", requiredTags: ["seating", "rug"], tip: "Use rugs and lamps to set the vibe." },
+      { name: "Library", mood: "Quiet Study", requiredTags: ["books", "lighting"], tip: "Bookshelves pair with lamps or plants." },
+      { name: "Rooftop", mood: "Sky Lounge", requiredTags: ["plant", "seating"], tip: "Soft seats and tall plants thrive under the stars." }
+    ];
 
     // Interaction state
     let currentInteractable = null;
     let marketOpen = false;
-    let selectedItemType = null; // "sofa" | "table" | "oven"
+    let selectedItemType = null;
+    let placementRotation = 0;
     let sitting = false;
     let savedCameraForSitting = null;
 
+    // Player state
+    const playerState = {
+      coins: 320,
+      totalStyle: 0,
+      questIndex: 0,
+    };
+
     // For ray picking when placing items
     let scene, camera;
-    let interactables = []; // meshes with .metadata.interactable
-    let furnitureByRoom = {}; // roomIndex -> [mesh,...]
+    let interactables = [];
+    let furnitureByRoom = {};
+    const roomPalettes = {};
+
+    // Day/night cycle
+    let timeOfDay = 0.15; // 0..1, 0=dawn, 0.5=dusk, 0.75=night
+    const timeSpeed = 0.0004;
+    let directionalLight, hemiLight, sky;
+
+    const ITEM_CATALOG = {
+      sofa: { label: "Plush Sofa", cost: 65, tags: ["seating"], size: { w: 2.2, d: 1, h: 1 }, color: new BABYLON.Color3(0.72, 0.44, 0.76), interactable: true },
+      table: { label: "Dining Table", cost: 40, tags: ["surface"], size: { w: 1.5, d: 1.5, h: 0.8 }, color: new BABYLON.Color3(0.6, 0.45, 0.28) },
+      oven: { label: "Modern Oven", cost: 55, tags: ["appliance", "surface"], size: { w: 1, d: 1, h: 1.4 }, color: new BABYLON.Color3(0.85, 0.85, 0.85), interactable: true },
+      lamp: { label: "Floor Lamp", cost: 25, tags: ["lighting"], size: { w: 0.5, d: 0.5, h: 1.8 }, color: new BABYLON.Color3(0.95, 0.9, 0.7) },
+      plant: { label: "Tall Plant", cost: 22, tags: ["plant"], size: { w: 0.8, d: 0.8, h: 1.6 }, color: new BABYLON.Color3(0.4, 0.78, 0.45) },
+      rug: { label: "Cozy Rug", cost: 18, tags: ["rug", "surface"], size: { w: 2.6, d: 2.6, h: 0.05 }, color: new BABYLON.Color3(0.3, 0.3, 0.55) },
+      bookshelf: { label: "Bookshelf", cost: 35, tags: ["books", "surface"], size: { w: 1.4, d: 0.6, h: 2 }, color: new BABYLON.Color3(0.55, 0.42, 0.3) },
+    };
+
+    const paletteChoices = [
+      { floor: new BABYLON.Color3(0.95, 0.92, 0.88), wall: new BABYLON.Color3(0.82, 0.86, 0.9) },
+      { floor: new BABYLON.Color3(0.2, 0.22, 0.3), wall: new BABYLON.Color3(0.38, 0.47, 0.58) },
+      { floor: new BABYLON.Color3(0.94, 0.84, 0.76), wall: new BABYLON.Color3(0.86, 0.74, 0.64) },
+      { floor: new BABYLON.Color3(0.86, 0.9, 0.76), wall: new BABYLON.Color3(0.6, 0.74, 0.55) },
+    ];
 
     // Create Scene
     const createScene = () => {
@@ -99,69 +233,51 @@
       scene.collisionsEnabled = true;
 
       // Camera (first-person-ish)
-      camera = new BABYLON.UniversalCamera("camera",
-        new BABYLON.Vector3(0, 2, -20), scene);
+      camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(0, 2, -22), scene);
       camera.attachControl(canvas, true);
-      camera.speed = 0.4;
-      camera.angularSensibility = 500;
+      camera.speed = 0.42;
+      camera.angularSensibility = 480;
       camera.ellipsoid = new BABYLON.Vector3(1, 1, 1.5);
       camera.checkCollisions = true;
       camera.applyGravity = true;
       camera.minZ = 0.1;
 
-      camera.keysUp = [87];   // W
-      camera.keysDown = [83]; // S
-      camera.keysLeft = [65]; // A
-      camera.keysRight = [68];// D
+      camera.keysUp = [87];
+      camera.keysDown = [83];
+      camera.keysLeft = [65];
+      camera.keysRight = [68];
 
       // Simple light + environment
-      const light = new BABYLON.HemisphericLight("light",
-        new BABYLON.Vector3(0, 1, 0), scene);
-      light.intensity = 0.9;
+      hemiLight = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+      hemiLight.intensity = 0.9;
 
-      const dirLight = new BABYLON.DirectionalLight("dirLight",
-        new BABYLON.Vector3(-0.5, -1, 0.5), scene);
-      dirLight.position = new BABYLON.Vector3(20, 40, -20);
-      dirLight.intensity = 0.6;
+      directionalLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-0.5, -1, 0.5), scene);
+      directionalLight.position = new BABYLON.Vector3(20, 40, -20);
+      directionalLight.intensity = 0.8;
 
-      // Ground (outside)
-      const ground = BABYLON.MeshBuilder.CreateGround("ground",
-        { width: 80, height: 80 }, scene);
+      // Ground (outside) with subtle path
+      const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 90, height: 90 }, scene);
       ground.position.y = 0;
       ground.checkCollisions = true;
       const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
-      groundMat.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.2);
+      groundMat.diffuseColor = new BABYLON.Color3(0.18, 0.45, 0.22);
       ground.material = groundMat;
 
-      // Skybox-ish dome
-      const sky = BABYLON.MeshBuilder.CreateSphere("sky",
-        { diameter: 200, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
+      const walkway = BABYLON.MeshBuilder.CreateGround("walkway", { width: 6, height: 60 }, scene);
+      walkway.position = new BABYLON.Vector3(0, 0.01, 10);
+      const walkwayMat = new BABYLON.StandardMaterial("walkwayMat", scene);
+      walkwayMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.55);
+      walkway.material = walkwayMat;
+
+      // Sky dome
+      sky = BABYLON.MeshBuilder.CreateSphere("sky", { diameter: 240, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
       const skyMat = new BABYLON.StandardMaterial("skyMat", scene);
       skyMat.diffuseColor = new BABYLON.Color3(0.4, 0.6, 0.9);
       skyMat.specularColor = new BABYLON.Color3(0, 0, 0);
       sky.material = skyMat;
 
       // MARKET STALL outside
-      const stall = BABYLON.MeshBuilder.CreateBox("marketStall",
-        { width: 4, depth: 3, height: 2 }, scene);
-      stall.position = new BABYLON.Vector3(-8, 1, -10);
-      const stallMat = new BABYLON.StandardMaterial("stallMat", scene);
-      stallMat.diffuseColor = new BABYLON.Color3(0.8, 0.6, 0.2);
-      stall.material = stallMat;
-      stall.checkCollisions = true;
-      stall.metadata = {
-        interactable: true,
-        type: "market",
-        label: "Market Stall"
-      };
-      interactables.push(stall);
-
-      const stallRoof = BABYLON.MeshBuilder.CreateBox("stallRoof",
-        { width: 4.2, depth: 3.2, height: 0.3 }, scene);
-      stallRoof.position = stall.position.add(new BABYLON.Vector3(0, 1.2, 0));
-      const roofMat = new BABYLON.StandardMaterial("roofMat", scene);
-      roofMat.diffuseColor = new BABYLON.Color3(0.9, 0.2, 0.2);
-      stallRoof.material = roofMat;
+      createMarket(scene);
 
       // HOUSE SHELL + outside front door
       createHouseAndRooms(scene);
@@ -172,17 +288,18 @@
           handleInteract();
         } else if (ev.code === "KeyM") {
           handleMarkRoomDone();
+        } else if (ev.code === "KeyP") {
+          repaintCurrentRoom();
         } else if (marketOpen) {
-          if (ev.code === "Digit1") {
-            selectedItemType = "sofa";
-            updateMarketHint();
-          } else if (ev.code === "Digit2") {
-            selectedItemType = "table";
-            updateMarketHint();
-          } else if (ev.code === "Digit3") {
-            selectedItemType = "oven";
-            updateMarketHint();
-          }
+          if (ev.code === "Digit1") selectItem("sofa");
+          else if (ev.code === "Digit2") selectItem("table");
+          else if (ev.code === "Digit3") selectItem("oven");
+          else if (ev.code === "Digit4") selectItem("lamp");
+          else if (ev.code === "Digit5") selectItem("plant");
+          else if (ev.code === "Digit6") selectItem("rug");
+          else if (ev.code === "Digit7") selectItem("bookshelf");
+          else if (ev.code === "KeyQ") rotateSelection(-Math.PI / 12);
+          else if (ev.code === "KeyR") rotateSelection(Math.PI / 12);
         }
       });
 
@@ -192,212 +309,180 @@
         if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
           const pickResult = pointerInfo.pickInfo;
           if (pickResult && pickResult.hit && pickResult.pickedMesh) {
-            // Place only on room floors
-            if (pickResult.pickedMesh.metadata &&
-                pickResult.pickedMesh.metadata.isRoomFloor) {
+            if (pickResult.pickedMesh.metadata && pickResult.pickedMesh.metadata.isRoomFloor) {
               placeFurniture(currentRoomIndex, selectedItemType, pickResult.pickedPoint);
             }
           }
         }
       });
 
-      // Main update loop for interactions
+      // Main update loop for interactions and sky
       scene.onBeforeRenderObservable.add(() => {
         updateInteractionTarget();
+        advanceTime();
       });
 
       // Start outside
       setCurrentRoom(-1);
+      updateQuests();
+      updateStats();
+      updateMarketHint();
+      log("Welcome back, decorator. Visit the stall to open the market.");
       return scene;
     };
 
-    function createHouseAndRooms(scene) {
-      // House "box" around rooms (just a visual shell)
-      const houseFloorY = 0.01;
-      const houseWidth = 40;
-      const houseDepth = 40;
+    function selectItem(item) {
+      selectedItemType = item;
+      updateMarketHint();
+    }
 
-      const houseGround = BABYLON.MeshBuilder.CreateGround("houseGround",
-        { width: houseWidth, height: houseDepth }, scene);
+    function rotateSelection(delta) {
+      placementRotation = (placementRotation + delta) % (Math.PI * 2);
+      updateMarketHint();
+    }
+
+    function createMarket(scene) {
+      const stall = BABYLON.MeshBuilder.CreateBox("marketStall", { width: 5, depth: 3.5, height: 2.2 }, scene);
+      stall.position = new BABYLON.Vector3(-8, 1.1, -12);
+      const stallMat = new BABYLON.StandardMaterial("stallMat", scene);
+      stallMat.diffuseColor = new BABYLON.Color3(0.78, 0.6, 0.28);
+      stall.material = stallMat;
+      stall.checkCollisions = true;
+      stall.metadata = { interactable: true, type: "market", label: "Designer's Market" };
+      interactables.push(stall);
+
+      const stallRoof = BABYLON.MeshBuilder.CreateBox("stallRoof", { width: 5.6, depth: 4, height: 0.28 }, scene);
+      stallRoof.position = stall.position.add(new BABYLON.Vector3(0, 1.25, 0));
+      const roofMat = new BABYLON.StandardMaterial("roofMat", scene);
+      roofMat.diffuseColor = new BABYLON.Color3(0.92, 0.26, 0.28);
+      stallRoof.material = roofMat;
+
+      const lantern = BABYLON.MeshBuilder.CreateSphere("lantern", { diameter: 0.4 }, scene);
+      lantern.position = stallRoof.position.add(new BABYLON.Vector3(0, -0.8, 0));
+      const lanternMat = new BABYLON.StandardMaterial("lanternMat", scene);
+      lanternMat.emissiveColor = new BABYLON.Color3(1, 0.9, 0.6);
+      lantern.material = lanternMat;
+      const lanternLight = new BABYLON.PointLight("lanternLight", lantern.position, scene);
+      lanternLight.intensity = 1.1;
+    }
+
+    function createHouseAndRooms(scene) {
+      const houseFloorY = 0.01;
+      const houseWidth = 42;
+      const houseDepth = 42;
+
+      const houseGround = BABYLON.MeshBuilder.CreateGround("houseGround", { width: houseWidth, height: houseDepth }, scene);
       houseGround.position = new BABYLON.Vector3(0, houseFloorY, 10);
       const houseGroundMat = new BABYLON.StandardMaterial("houseGroundMat", scene);
-      houseGroundMat.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.9);
+      houseGroundMat.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.95);
       houseGround.material = houseGroundMat;
       houseGround.checkCollisions = true;
 
-      // Outer walls
-      function createWall(name, w, h, d, pos, scene) {
+      function createWall(name, w, h, d, pos) {
         const wall = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
         wall.position = pos;
         const mat = new BABYLON.StandardMaterial(name + "Mat", scene);
-        mat.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.9);
+        mat.diffuseColor = new BABYLON.Color3(0.82, 0.85, 0.9);
         wall.material = mat;
         wall.checkCollisions = true;
         return wall;
       }
 
-      const wallHeight = 4;
-      // Back wall
-      createWall("backWall", houseWidth, wallHeight, 0.5,
-        new BABYLON.Vector3(0, wallHeight / 2, 10 + houseDepth / 2), scene);
-      // Front wall (with gap for door)
-      const frontWallLeft = createWall("frontWallLeft", houseWidth / 2 - 2, wallHeight, 0.5,
-        new BABYLON.Vector3(-houseWidth / 4 - 2, wallHeight / 2, 10 - houseDepth / 2), scene);
-      const frontWallRight = createWall("frontWallRight", houseWidth / 2 - 2, wallHeight, 0.5,
-        new BABYLON.Vector3(houseWidth / 4 + 2, wallHeight / 2, 10 - houseDepth / 2), scene);
+      const wallHeight = 4.2;
+      createWall("backWall", houseWidth, wallHeight, 0.5, new BABYLON.Vector3(0, wallHeight / 2, 10 + houseDepth / 2));
+      createWall("frontWallLeft", houseWidth / 2 - 2, wallHeight, 0.5, new BABYLON.Vector3(-houseWidth / 4 - 2, wallHeight / 2, 10 - houseDepth / 2));
+      createWall("frontWallRight", houseWidth / 2 - 2, wallHeight, 0.5, new BABYLON.Vector3(houseWidth / 4 + 2, wallHeight / 2, 10 - houseDepth / 2));
+      createWall("leftWall", 0.5, wallHeight, houseDepth, new BABYLON.Vector3(-houseWidth / 2, wallHeight / 2, 10));
+      createWall("rightWall", 0.5, wallHeight, houseDepth, new BABYLON.Vector3(houseWidth / 2, wallHeight / 2, 10));
 
-      // Side walls
-      createWall("leftWall", 0.5, wallHeight, houseDepth,
-        new BABYLON.Vector3(-houseWidth / 2, wallHeight / 2, 10), scene);
-      createWall("rightWall", 0.5, wallHeight, houseDepth,
-        new BABYLON.Vector3(houseWidth / 2, wallHeight / 2, 10), scene);
-
-      // Simple flat "ceiling"
-      const ceiling = BABYLON.MeshBuilder.CreateGround("ceiling",
-        { width: houseWidth, height: houseDepth }, scene);
+      const ceiling = BABYLON.MeshBuilder.CreateGround("ceiling", { width: houseWidth, height: houseDepth }, scene);
       ceiling.position = new BABYLON.Vector3(0, wallHeight + 0.01, 10);
       ceiling.rotation.x = Math.PI;
       const ceilingMat = new BABYLON.StandardMaterial("ceilingMat", scene);
-      ceilingMat.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.98);
+      ceilingMat.diffuseColor = new BABYLON.Color3(0.96, 0.97, 0.98);
       ceiling.material = ceilingMat;
 
-      // Front door (outside -> room 0)
-      const frontDoor = BABYLON.MeshBuilder.CreateBox("frontDoor",
-        { width: 2, height: 3, depth: 0.3 }, scene);
+      const frontDoor = BABYLON.MeshBuilder.CreateBox("frontDoor", { width: 2, height: 3, depth: 0.3 }, scene);
       frontDoor.position = new BABYLON.Vector3(0, 1.5, 10 - houseDepth / 2 + 0.3);
       const doorMat = new BABYLON.StandardMaterial("frontDoorMat", scene);
-      doorMat.diffuseColor = new BABYLON.Color3(0.5, 0.3, 0.1);
+      doorMat.diffuseColor = new BABYLON.Color3(0.52, 0.32, 0.16);
       frontDoor.material = doorMat;
-      frontDoor.metadata = {
-        interactable: true,
-        type: "door",
-        label: "Front Door",
-        fromRoom: -1,
-        toRoom: 0
-      };
+      frontDoor.metadata = { interactable: true, type: "door", label: "Front Door", fromRoom: -1, toRoom: 0 };
       interactables.push(frontDoor);
 
-      // Create 7 rooms inside the house
-      // Layout: 4 ground floor rooms in a row, 3 upstairs in a row above
       const roomSize = 8;
-      const corridorZ = 10; // house center z
+      const corridorZ = 10;
 
       for (let i = 0; i < NUM_ROOMS; i++) {
         const floorIndex = i < 4 ? 0 : 1;
         const indexOnFloor = i < 4 ? i : i - 4;
 
         const roomCenterX = -12 + indexOnFloor * (roomSize + 1);
-        const roomCenterY = floorIndex === 0 ? 0.02 : 4.02;
+        const roomCenterY = floorIndex === 0 ? 0.02 : 4.22;
         const roomCenterZ = corridorZ;
 
-        // Floor
-        const floor = BABYLON.MeshBuilder.CreateGround("roomFloor_" + i,
-          { width: roomSize, height: roomSize }, scene);
+        const palette = paletteChoices[i % paletteChoices.length];
+        roomPalettes[i] = palette;
+
+        const floor = BABYLON.MeshBuilder.CreateGround("roomFloor_" + i, { width: roomSize, height: roomSize }, scene);
         floor.position = new BABYLON.Vector3(roomCenterX, roomCenterY, roomCenterZ);
         const floorMat = new BABYLON.StandardMaterial("floorMat_" + i, scene);
-        floorMat.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.95);
+        floorMat.diffuseColor = palette.floor;
         floor.material = floorMat;
         floor.checkCollisions = true;
         floor.metadata = { isRoomFloor: true, roomIndex: i };
 
-        // Simple walls around the floor (4 per room, with a gap for door)
         const half = roomSize / 2;
-        const wallH = 3.8;
+        const wallH = 3.9;
 
-        // back wall
-        createRoomWall("roomBack_" + i,
-          roomSize, wallH, 0.2,
-          new BABYLON.Vector3(roomCenterX, roomCenterY + wallH / 2, roomCenterZ + half),
-          scene);
+        createRoomWall("roomBack_" + i, roomSize, wallH, 0.2, new BABYLON.Vector3(roomCenterX, roomCenterY + wallH / 2, roomCenterZ + half));
+        createRoomWall("roomFrontLeft_" + i, roomSize / 2 - 1, wallH, 0.2, new BABYLON.Vector3(roomCenterX - (roomSize / 4 + 0.5), roomCenterY + wallH / 2, roomCenterZ - half));
+        createRoomWall("roomFrontRight_" + i, roomSize / 2 - 1, wallH, 0.2, new BABYLON.Vector3(roomCenterX + (roomSize / 4 + 0.5), roomCenterY + wallH / 2, roomCenterZ - half));
+        createRoomWall("roomLeft_" + i, 0.2, wallH, roomSize, new BABYLON.Vector3(roomCenterX - half, roomCenterY + wallH / 2, roomCenterZ));
+        createRoomWall("roomRight_" + i, 0.2, wallH, roomSize, new BABYLON.Vector3(roomCenterX + half, roomCenterY + wallH / 2, roomCenterZ));
 
-        // front wall (gap in middle for internal door)
-        const frontLeft = createRoomWall("roomFrontLeft_" + i,
-          roomSize / 2 - 1, wallH, 0.2,
-          new BABYLON.Vector3(roomCenterX - (roomSize / 4 + 0.5), roomCenterY + wallH / 2, roomCenterZ - half),
-          scene);
-        const frontRight = createRoomWall("roomFrontRight_" + i,
-          roomSize / 2 - 1, wallH, 0.2,
-          new BABYLON.Vector3(roomCenterX + (roomSize / 4 + 0.5), roomCenterY + wallH / 2, roomCenterZ - half),
-          scene);
-
-        // left wall
-        createRoomWall("roomLeft_" + i,
-          0.2, wallH, roomSize,
-          new BABYLON.Vector3(roomCenterX - half, roomCenterY + wallH / 2, roomCenterZ),
-          scene);
-
-        // right wall
-        createRoomWall("roomRight_" + i,
-          0.2, wallH, roomSize,
-          new BABYLON.Vector3(roomCenterX + half, roomCenterY + wallH / 2, roomCenterZ),
-          scene);
-
-        // Doors between rooms:
-        // forward door: to next room (except room 3 uses stairs, and 6 is last)
         if (i < NUM_ROOMS - 1) {
           if (i === 3) {
-            // stairs instead of forward door (up to room 4)
-            const stairs = BABYLON.MeshBuilder.CreateBox("stairs_" + i,
-              { width: 2, height: 1, depth: 3 }, scene);
-            stairs.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 0.5, roomCenterZ - half + 1.5);
+            const stairs = BABYLON.MeshBuilder.CreateBox("stairs_" + i, { width: 2.2, height: 1.2, depth: 3.2 }, scene);
+            stairs.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 0.6, roomCenterZ - half + 1.5);
             const stairsMat = new BABYLON.StandardMaterial("stairsMat_" + i, scene);
-            stairsMat.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.6);
+            stairsMat.diffuseColor = new BABYLON.Color3(0.65, 0.65, 0.7);
             stairs.material = stairsMat;
-            stairs.metadata = {
-              interactable: true,
-              type: "stairs",
-              label: "Stairs Up",
-              fromRoom: i,
-              toRoom: i + 1
-            };
+            stairs.metadata = { interactable: true, type: "stairs", label: "Stairs Up", fromRoom: i, toRoom: i + 1 };
             interactables.push(stairs);
-            stairs.setEnabled(false); // locked until room 3 is done
+            stairs.setEnabled(false);
           } else {
-            const door = BABYLON.MeshBuilder.CreateBox("roomDoorForward_" + i,
-              { width: 1.4, height: 2.5, depth: 0.3 }, scene);
+            const door = BABYLON.MeshBuilder.CreateBox("roomDoorForward_" + i, { width: 1.4, height: 2.5, depth: 0.3 }, scene);
             door.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 1.3, roomCenterZ - half + 0.2);
             const mat = new BABYLON.StandardMaterial("roomDoorForwardMat_" + i, scene);
-            mat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2);
+            mat.diffuseColor = new BABYLON.Color3(0.6, 0.42, 0.22);
             door.material = mat;
-            door.metadata = {
-              interactable: true,
-              type: "doorRoom",
-              label: "Door to next room",
-              fromRoom: i,
-              toRoom: i + 1
-            };
+            door.metadata = { interactable: true, type: "doorRoom", label: "Door to next room", fromRoom: i, toRoom: i + 1 };
             interactables.push(door);
-            door.setEnabled(false); // locked until room i is done
+            door.setEnabled(false);
           }
         }
 
-        // backward door for going back (except room 0 which goes to outside via front door)
         if (i > 0) {
-          const backDoor = BABYLON.MeshBuilder.CreateBox("roomDoorBack_" + i,
-            { width: 1.4, height: 2.5, depth: 0.3 }, scene);
+          const backDoor = BABYLON.MeshBuilder.CreateBox("roomDoorBack_" + i, { width: 1.4, height: 2.5, depth: 0.3 }, scene);
           backDoor.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 1.3, roomCenterZ + half - 0.2);
           const mat2 = new BABYLON.StandardMaterial("roomDoorBackMat_" + i, scene);
-          mat2.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2);
+          mat2.diffuseColor = new BABYLON.Color3(0.58, 0.42, 0.24);
           backDoor.material = mat2;
-          backDoor.metadata = {
-            interactable: true,
-            type: "doorRoom",
-            label: "Door to previous room",
-            fromRoom: i,
-            toRoom: i - 1
-          };
+          backDoor.metadata = { interactable: true, type: "doorRoom", label: "Door to previous room", fromRoom: i, toRoom: i - 1 };
           interactables.push(backDoor);
         }
 
+        roomStates.push({ done: false, unlocked: i === 0 });
         furnitureByRoom[i] = [];
       }
     }
 
-    function createRoomWall(name, w, h, d, pos, scene) {
+    function createRoomWall(name, w, h, d, pos) {
       const wall = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
       wall.position = pos;
       const wallMat = new BABYLON.StandardMaterial(name + "Mat", scene);
-      wallMat.diffuseColor = new BABYLON.Color3(0.92, 0.92, 0.96);
+      wallMat.diffuseColor = paletteChoices[(pos.x + pos.z) % paletteChoices.length]?.wall || new BABYLON.Color3(0.92, 0.92, 0.96);
       wall.material = wallMat;
       wall.checkCollisions = true;
       return wall;
@@ -406,20 +491,24 @@
     function setCurrentRoom(index) {
       currentRoomIndex = index;
       if (index === -1) {
-        roomInfoEl.textContent = "Room: Outside (yard & market stall)";
+        roomInfoEl.textContent = "Outside";
+        themeLabelEl.textContent = "Outside Yard";
+        themeInfoEl.textContent = "Find the market stall to open the catalog.";
       } else {
+        const meta = ROOM_THEMES[index];
         const floor = index < 4 ? 1 : 2;
         const onFloorIndex = index < 4 ? index + 1 : index - 4 + 1;
-        roomInfoEl.textContent = `Room ${index + 1} of ${NUM_ROOMS} (Floor ${floor}, Room ${onFloorIndex} on this floor)`;
+        roomInfoEl.textContent = `${meta.name} (Room ${index + 1} / ${NUM_ROOMS}, Floor ${floor}-${onFloorIndex})`;
+        themeLabelEl.textContent = `${meta.mood}`;
+        themeInfoEl.textContent = `Goal: ${meta.tip}`;
       }
       updateMarketHint();
       interactionHintEl.textContent = "";
     }
 
     function teleportToRoom(roomIndex) {
-      // Move camera to a reasonable spawn position for given room
       if (roomIndex === -1) {
-        camera.position = new BABYLON.Vector3(0, 2, -20);
+        camera.position = new BABYLON.Vector3(0, 2, -22);
         setCurrentRoom(-1);
         return;
       }
@@ -427,7 +516,7 @@
       const floorIndex = roomIndex < 4 ? 0 : 1;
       const indexOnFloor = roomIndex < 4 ? roomIndex : roomIndex - 4;
       const roomCenterX = -12 + indexOnFloor * (8 + 1);
-      const roomCenterY = floorIndex === 0 ? 1.8 : 5.8;
+      const roomCenterY = floorIndex === 0 ? 1.8 : 5.9;
       const roomCenterZ = 10;
 
       camera.position = new BABYLON.Vector3(roomCenterX, roomCenterY, roomCenterZ + 2.5);
@@ -439,7 +528,6 @@
       interactionHintEl.textContent = "";
 
       const playerPos = camera.position;
-
       let best = null;
       let bestDist = Infinity;
 
@@ -447,7 +535,7 @@
         if (!mesh.isEnabled()) return;
         const mpos = mesh.position;
         const dist = BABYLON.Vector3.Distance(playerPos, mpos);
-        if (dist < 4 && dist < bestDist) {
+        if (dist < 4.2 && dist < bestDist) {
           best = mesh;
           bestDist = dist;
         }
@@ -464,10 +552,9 @@
 
     function handleInteract() {
       if (sitting && savedCameraForSitting) {
-        // stand up
         camera.position = savedCameraForSitting.position.clone();
         camera.rotation = savedCameraForSitting.rotation.clone();
-        camera.speed = 0.4;
+        camera.speed = 0.42;
         sitting = false;
         savedCameraForSitting = null;
         interactionHintEl.textContent = "";
@@ -481,11 +568,11 @@
         marketOpen = !marketOpen;
         if (!marketOpen) selectedItemType = null;
         updateMarketHint();
+        log(marketOpen ? "Market opened. Pick an item and click a floor." : "Market closed.");
         return;
       }
 
       if (meta.type === "door") {
-        // front door (outside <-> room 0)
         if (currentRoomIndex === -1 && meta.toRoom === 0 && roomStates[0].unlocked) {
           teleportToRoom(0);
         } else if (currentRoomIndex === 0 && meta.toRoom === -1) {
@@ -496,7 +583,6 @@
 
       if (meta.type === "doorRoom") {
         const to = meta.toRoom;
-        // only forward if target room is unlocked; backward is always allowed
         if (to > currentRoomIndex && !roomStates[to].unlocked) {
           interactionHintEl.textContent = "You haven't unlocked the next room yet.";
           return;
@@ -516,58 +602,103 @@
       }
 
       if (meta.type === "sofa") {
-        // Sit on sofa: save camera state, move to a sit position, lower height and stop moving
         if (!sitting) {
-          savedCameraForSitting = {
-            position: camera.position.clone(),
-            rotation: camera.rotation.clone()
-          };
-          const forward = new BABYLON.Vector3(0, 0, -1);
-          const sofaForward = forward; // simple assumption
-          const seatPos = currentInteractable.position.add(sofaForward.scale(-0.5));
-          seatPos.y = currentInteractable.position.y + 1;
+          savedCameraForSitting = { position: camera.position.clone(), rotation: camera.rotation.clone() };
+          const seatPos = currentInteractable.position.add(new BABYLON.Vector3(0, 1, -0.5));
           camera.position = seatPos;
           camera.rotation.x = 0;
           camera.rotation.y = currentInteractable.rotation.y;
-          camera.speed = 0; // no movement while sitting
+          camera.speed = 0;
           sitting = true;
-          interactionHintEl.textContent = "Sitting on sofa. Press E to stand up.";
+          interactionHintEl.textContent = "Sitting. Press E to stand.";
         }
         return;
       }
 
       if (meta.type === "oven") {
-        // Simple "cook" effect: change color briefly
         const mat = currentInteractable.material;
         const originalColor = mat.diffuseColor.clone();
         mat.diffuseColor = new BABYLON.Color3(1, 0.4, 0.1);
-        interactionHintEl.textContent = "You use the oven. Something delicious is cooking...";
+        interactionHintEl.textContent = "You use the oven. The aroma fills the house.";
         setTimeout(() => {
           mat.diffuseColor = originalColor;
           interactionHintEl.textContent = "";
-        }, 2000);
+        }, 1800);
         return;
       }
     }
 
     function handleMarkRoomDone() {
       if (currentRoomIndex < 0) {
-        interactionHintEl.textContent = "You must be inside a room to mark it done.";
+        interactionHintEl.textContent = "You must be inside a room to evaluate it.";
         return;
       }
       const idx = currentRoomIndex;
+      const evaluation = evaluateRoom(idx);
+      interactionHintEl.textContent = evaluation.message;
+      if (!evaluation.success) {
+        log(evaluation.message);
+        return;
+      }
       roomStates[idx].done = true;
-      interactionHintEl.textContent = `Room ${idx + 1} marked as done.`;
+      roomStates[idx].styleScore = evaluation.styleScore;
+      playerState.totalStyle += evaluation.styleScore;
+      playerState.coins += evaluation.bonus;
+      log(`Room ${idx + 1} finished! Earned ${evaluation.bonus} coins and ${evaluation.styleScore} style.`);
 
-      // Unlock next room / stairs
       if (idx < NUM_ROOMS - 1) {
         roomStates[idx + 1].unlocked = true;
       }
 
-      // Enable corresponding forward door / stairs mesh
       const forwardDoorName = idx === 3 ? "stairs_" + idx : "roomDoorForward_" + idx;
       const mesh = scene.getMeshByName(forwardDoorName);
       if (mesh) mesh.setEnabled(true);
+
+      updateStats();
+      updateMarketHint();
+      updateQuests();
+    }
+
+    function evaluateRoom(roomIndex) {
+      const items = furnitureByRoom[roomIndex] || [];
+      const meta = ROOM_THEMES[roomIndex];
+      const tags = new Set();
+      items.forEach(m => {
+        if (m.metadata?.tags) {
+          m.metadata.tags.forEach(t => tags.add(t));
+        }
+      });
+
+      const missing = meta.requiredTags.filter(tag => !tags.has(tag));
+      if (missing.length) {
+        return { success: false, styleScore: 0, bonus: 0, message: `Missing: ${missing.join(", ")}. Add these to finish.` };
+      }
+
+      const variety = tags.size;
+      const styleScore = Math.round(items.length * 10 + variety * 12 + Math.random() * 6);
+      const bonus = 20 + variety * 5;
+      return { success: true, styleScore, bonus, message: `Success! Style ${styleScore}, bonus ${bonus} coins.` };
+    }
+
+    function repaintCurrentRoom() {
+      if (currentRoomIndex < 0) {
+        interactionHintEl.textContent = "Walk inside to paint.";
+        return;
+      }
+      const palette = paletteChoices[Math.floor(Math.random() * paletteChoices.length)];
+      roomPalettes[currentRoomIndex] = palette;
+      const floor = scene.getMeshByName("floorMat_" + currentRoomIndex) || scene.getMeshByName("roomFloor_" + currentRoomIndex);
+      const floorMat = scene.getMaterialByName("floorMat_" + currentRoomIndex);
+      if (floorMat) floorMat.diffuseColor = palette.floor;
+
+      ["roomBack_", "roomFrontLeft_", "roomFrontRight_", "roomLeft_", "roomRight_"].forEach(prefix => {
+        const mesh = scene.getMeshByName(prefix + currentRoomIndex);
+        const mat = mesh ? mesh.material : null;
+        if (mat && mat.diffuseColor) mat.diffuseColor = palette.wall;
+      });
+
+      interactionHintEl.textContent = "Walls refreshed with a new palette.";
+      log(`Room ${currentRoomIndex + 1} repainted.`);
     }
 
     function updateMarketHint() {
@@ -575,9 +706,10 @@
         marketHintEl.textContent = "Market: walk to the stall outside and press E to open.";
         return;
       }
-      let text = "Market OPEN. Press 1=sofa, 2=table, 3=oven. Click room floor to place.";
+      let text = "Market OPEN. 1 Sofa, 2 Table, 3 Oven, 4 Lamp, 5 Plant, 6 Rug, 7 Bookshelf. Click floor to place.";
       if (selectedItemType) {
-        text += ` Selected: ${selectedItemType}.`;
+        const item = ITEM_CATALOG[selectedItemType];
+        text += ` Selected: ${item.label} (${item.cost} coins). Rotation ${(placementRotation * 180 / Math.PI).toFixed(0)}°.`;
       }
       marketHintEl.textContent = text;
     }
@@ -587,38 +719,119 @@
         interactionHintEl.textContent = "You can only place furniture inside rooms.";
         return;
       }
-      let mesh;
-      const y = position.y + 0.5;
-
-      if (type === "sofa") {
-        mesh = BABYLON.MeshBuilder.CreateBox("sofa", { width: 2.2, depth: 1, height: 1 }, scene);
-        const mat = new BABYLON.StandardMaterial("sofaMat", scene);
-        mat.diffuseColor = new BABYLON.Color3(0.6, 0.2, 0.6);
-        mesh.material = mat;
-        mesh.metadata = { type: "sofa", interactable: true, label: "Sofa" };
-      } else if (type === "table") {
-        mesh = BABYLON.MeshBuilder.CreateBox("table", { width: 1.5, depth: 1.5, height: 0.8 }, scene);
-        const mat = new BABYLON.StandardMaterial("tableMat", scene);
-        mat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2);
-        mesh.material = mat;
-        // Not interactable beyond decoration (no words)
-      } else if (type === "oven") {
-        mesh = BABYLON.MeshBuilder.CreateBox("oven", { width: 1, depth: 1, height: 1.4 }, scene);
-        const mat = new BABYLON.StandardMaterial("ovenMat", scene);
-        mat.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
-        mesh.material = mat;
-        mesh.metadata = { type: "oven", interactable: true, label: "Oven" };
-      } else {
+      const spec = ITEM_CATALOG[type];
+      if (!spec) return;
+      if (playerState.coins < spec.cost) {
+        interactionHintEl.textContent = "Not enough coins for that item.";
+        log("Earn more coins by finishing rooms.");
         return;
       }
 
+      playerState.coins -= spec.cost;
+      let mesh;
+      const y = position.y + spec.size.h / 2;
+
+      if (type === "sofa") {
+        mesh = BABYLON.MeshBuilder.CreateBox("sofa", { width: spec.size.w, depth: spec.size.d, height: spec.size.h }, scene);
+      } else if (type === "table") {
+        mesh = BABYLON.MeshBuilder.CreateBox("table", { width: spec.size.w, depth: spec.size.d, height: spec.size.h }, scene);
+      } else if (type === "oven") {
+        mesh = BABYLON.MeshBuilder.CreateBox("oven", { width: spec.size.w, depth: spec.size.d, height: spec.size.h }, scene);
+      } else if (type === "lamp") {
+        mesh = BABYLON.MeshBuilder.CreateCylinder("lamp", { diameter: spec.size.w, height: spec.size.h }, scene);
+        const bulb = BABYLON.MeshBuilder.CreateSphere("lampBulb" + Math.random(), { diameter: 0.35 }, scene);
+        bulb.position = new BABYLON.Vector3(position.x, y + spec.size.h / 2, position.z);
+        const bulbMat = new BABYLON.StandardMaterial("lampBulbMat" + Math.random(), scene);
+        bulbMat.emissiveColor = new BABYLON.Color3(1, 0.95, 0.75);
+        bulb.material = bulbMat;
+        const bulbLight = new BABYLON.PointLight("lampLight" + Math.random(), bulb.position, scene);
+        bulbLight.intensity = 0.8;
+      } else if (type === "plant") {
+        const pot = BABYLON.MeshBuilder.CreateCylinder("plantPot", { diameter: spec.size.w * 0.7, height: spec.size.h * 0.3 }, scene);
+        pot.position = new BABYLON.Vector3(position.x, position.y + spec.size.h * 0.15, position.z);
+        const leaves = BABYLON.MeshBuilder.CreateSphere("plantLeaves", { diameter: spec.size.w * 1.2 }, scene);
+        leaves.position = new BABYLON.Vector3(position.x, position.y + spec.size.h * 0.8, position.z);
+        const potMat = new BABYLON.StandardMaterial("plantPotMat", scene);
+        potMat.diffuseColor = new BABYLON.Color3(0.45, 0.28, 0.22);
+        pot.material = potMat;
+        mesh = pot;
+        const leafMat = new BABYLON.StandardMaterial("leafMat", scene);
+        leafMat.diffuseColor = spec.color;
+        leaves.material = leafMat;
+      } else if (type === "rug") {
+        mesh = BABYLON.MeshBuilder.CreateBox("rug", { width: spec.size.w, depth: spec.size.d, height: spec.size.h }, scene);
+      } else if (type === "bookshelf") {
+        mesh = BABYLON.MeshBuilder.CreateBox("bookshelf", { width: spec.size.w, depth: spec.size.d, height: spec.size.h }, scene);
+      }
+
+      if (!mesh) return;
+
       mesh.position = new BABYLON.Vector3(position.x, y, position.z);
+      mesh.rotation.y = placementRotation;
       mesh.checkCollisions = true;
 
-      if (mesh.metadata && mesh.metadata.interactable) {
+      const mat = new BABYLON.StandardMaterial(type + "Mat", scene);
+      mat.diffuseColor = spec.color;
+      mesh.material = mat;
+      mesh.metadata = { type, interactable: !!spec.interactable, label: spec.label, tags: spec.tags };
+
+      if (mesh.metadata.interactable) {
         interactables.push(mesh);
       }
       furnitureByRoom[roomIndex].push(mesh);
+
+      updateStats();
+      interactionHintEl.textContent = `${spec.label} placed for ${spec.cost} coins.`;
+      log(`${spec.label} placed in Room ${roomIndex + 1}.`);
+    }
+
+    function advanceTime() {
+      const delta = scene.getEngine().getDeltaTime();
+      timeOfDay = (timeOfDay + delta * timeSpeed) % 1;
+      const light = directionalLight;
+      const sunHeight = Math.cos(timeOfDay * Math.PI * 2) * 0.5 + 0.5;
+      light.intensity = 0.35 + sunHeight * 0.9;
+      hemiLight.intensity = 0.4 + sunHeight * 0.5;
+
+      const dawn = new BABYLON.Color3(0.85, 0.65, 0.75);
+      const noon = new BABYLON.Color3(0.45, 0.65, 0.9);
+      const dusk = new BABYLON.Color3(0.25, 0.25, 0.35);
+
+      let blend;
+      if (timeOfDay < 0.25) {
+        blend = BABYLON.Color3.Lerp(dawn, noon, timeOfDay / 0.25);
+      } else if (timeOfDay < 0.5) {
+        blend = BABYLON.Color3.Lerp(noon, dusk, (timeOfDay - 0.25) / 0.25);
+      } else if (timeOfDay < 0.75) {
+        blend = BABYLON.Color3.Lerp(dusk, dawn, (timeOfDay - 0.5) / 0.25);
+      } else {
+        blend = BABYLON.Color3.Lerp(dawn, noon, (timeOfDay - 0.75) / 0.25);
+      }
+      sky.material.diffuseColor = blend;
+
+      timeStatEl.textContent = timeOfDay < 0.25 ? "Morning" : timeOfDay < 0.5 ? "Afternoon" : timeOfDay < 0.75 ? "Evening" : "Night";
+    }
+
+    function updateStats() {
+      coinStatEl.textContent = playerState.coins;
+      styleStatEl.textContent = playerState.totalStyle;
+    }
+
+    function updateQuests() {
+      const quests = ROOM_THEMES.map((theme, idx) => {
+        const unlocked = roomStates[idx]?.unlocked;
+        const done = roomStates[idx]?.done;
+        const status = done ? "✅" : unlocked ? "▶" : "🔒";
+        return `${status} ${idx + 1}. ${theme.name} — ${theme.mood}`;
+      });
+      questListEl.innerHTML = `<strong>Decorating Brief</strong><br>${quests.join("<br>")}`;
+    }
+
+    function log(text) {
+      const entry = document.createElement("div");
+      entry.textContent = `${new Date().toLocaleTimeString()} — ${text}`;
+      logEl.prepend(entry);
+      while (logEl.childNodes.length > 10) logEl.removeChild(logEl.lastChild);
     }
 
     const sceneInstance = createScene();
