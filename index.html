@@ -88,6 +88,12 @@
       font-weight: 600;
     }
 
+    #petHint {
+      margin-top: 6px;
+      color: #38bdf8;
+      font-weight: 600;
+    }
+
     #themeInfo {
       margin-top: 4px;
       color: #e2e8f0;
@@ -138,14 +144,16 @@
     <div id="themeInfo">Decorate each room to satisfy its mood requirements and earn bonuses.</div>
     <div id="interactionHint"></div>
     <div id="marketHint"></div>
+    <div id="petHint"></div>
 
     <div id="questList"></div>
 
     <div class="controls">
       <strong>Controls</strong><br />
       WASD to move · Mouse to look · Space to jump<br />
-      E to interact (doors, stairs, stall, sofa, oven) · M to evaluate current room<br />
-      1-7 to select catalog item while market is open · Q/R to rotate selection · P to repaint current room
+      E to interact (doors, stairs, stall, sofa, oven, tennis, barbecue) · M to evaluate current room<br />
+      1-7 to select catalog item while market is open · Q/R to rotate selection · P to repaint current room<br />
+      Pet market: press 8/9/0 to adopt when open
     </div>
 
     <div id="log"></div>
@@ -162,6 +170,7 @@
     const themeInfoEl = document.getElementById("themeInfo");
     const interactionHintEl = document.getElementById("interactionHint");
     const marketHintEl = document.getElementById("marketHint");
+    const petHintEl = document.getElementById("petHint");
     const coinStatEl = document.getElementById("coinStat");
     const styleStatEl = document.getElementById("styleStat");
     const timeStatEl = document.getElementById("timeStat");
@@ -188,6 +197,8 @@
     let marketOpen = false;
     let selectedItemType = null;
     let placementRotation = 0;
+    let petMarketOpen = false;
+    let selectedPetType = null;
     let sitting = false;
     let savedCameraForSitting = null;
 
@@ -204,6 +215,38 @@
     let furnitureByRoom = {};
     const roomPalettes = {};
     const roomMaterials = {};
+    const adoptedPets = [];
+
+    const tennisState = {
+      playing: false,
+      ball: null,
+      bounds: null,
+      velocity: new BABYLON.Vector3(0, 0, 0),
+      opponent: null,
+      center: new BABYLON.Vector3(14, 0.5, -6),
+      courtSize: { w: 14, d: 22 }
+    };
+
+    const barbecueState = {
+      grill: null,
+      chef: null,
+      cooking: false,
+      timer: 0,
+      platter: null
+    };
+
+    const limoState = {
+      body: null,
+      driver: null,
+      t: 0,
+      path: [
+        new BABYLON.Vector3(-22, 0.4, -18),
+        new BABYLON.Vector3(22, 0.4, -18),
+        new BABYLON.Vector3(22, 0.4, 18),
+        new BABYLON.Vector3(-22, 0.4, 18)
+      ],
+      speed: 0.007
+    };
 
     // Day/night cycle
     let timeOfDay = 0.15; // 0..1, 0=dawn, 0.5=dusk, 0.75=night
@@ -218,6 +261,12 @@
       plant: { label: "Tall Plant", cost: 22, tags: ["plant"], size: { w: 0.8, d: 0.8, h: 1.6 }, color: new BABYLON.Color3(0.4, 0.78, 0.45) },
       rug: { label: "Cozy Rug", cost: 18, tags: ["rug", "surface"], size: { w: 2.6, d: 2.6, h: 0.05 }, color: new BABYLON.Color3(0.3, 0.3, 0.55) },
       bookshelf: { label: "Bookshelf", cost: 35, tags: ["books", "surface"], size: { w: 1.4, d: 0.6, h: 2 }, color: new BABYLON.Color3(0.55, 0.42, 0.3) },
+    };
+
+    const PET_CATALOG = {
+      corgi: { label: "Corgi Pup", cost: 90, accent: new BABYLON.Color3(0.92, 0.7, 0.46), coat: new BABYLON.Color3(0.94, 0.86, 0.8) },
+      tuxedo: { label: "Tuxedo Cat", cost: 70, accent: new BABYLON.Color3(0.1, 0.1, 0.12), coat: new BABYLON.Color3(0.92, 0.94, 0.96) },
+      robo: { label: "Robot Companion", cost: 110, accent: new BABYLON.Color3(0.44, 0.78, 0.96), coat: new BABYLON.Color3(0.78, 0.82, 0.88) }
     };
 
     const paletteChoices = [
@@ -392,6 +441,49 @@
       return mat;
     }
 
+    function createPetMesh(name, spec, scene) {
+      const root = new BABYLON.TransformNode(`pet_${name}`, scene);
+
+      const body = BABYLON.MeshBuilder.CreateBox(`${name}_body`, { width: 1.2, height: 0.7, depth: 1.6 }, scene);
+      body.material = createFabricMaterial(`${name}_coat`, scene, spec.coat, spec.accent.scale(0.7));
+      body.parent = root;
+      body.position.y = 0.35;
+
+      const head = BABYLON.MeshBuilder.CreateBox(`${name}_head`, { size: 0.6 }, scene);
+      head.material = createFabricMaterial(`${name}_face`, scene, spec.coat, spec.accent);
+      head.parent = root;
+      head.position = new BABYLON.Vector3(0, 0.75, 0.6);
+
+      const ears = BABYLON.MeshBuilder.CreateBox(`${name}_ears`, { width: 0.8, height: 0.2, depth: 0.4 }, scene);
+      ears.material = createFabricMaterial(`${name}_earsMat`, scene, spec.accent, spec.accent.scale(0.85));
+      ears.parent = head;
+      ears.position = new BABYLON.Vector3(0, 0.35, -0.02);
+
+      const collar = BABYLON.MeshBuilder.CreateTorus(`${name}_collar`, { diameter: 0.7, thickness: 0.05 }, scene);
+      collar.material = createMetalMaterial(`${name}_collarMat`, scene, new BABYLON.Color3(0.95, 0.8, 0.3));
+      collar.parent = head;
+      collar.rotation.x = Math.PI / 2;
+      collar.position.y = -0.32;
+
+      const nameCard = new BABYLON.DynamicTexture(`${name}_labelTex`, { width: 256, height: 64 }, scene, false);
+      nameCard.hasAlpha = true;
+      const nameCtx = nameCard.getContext();
+      nameCtx.fillStyle = "rgba(15,23,42,0.75)";
+      nameCtx.fillRect(0, 0, 256, 64);
+      nameCtx.fillStyle = "#f8fafc";
+      nameCtx.font = "28px Inter";
+      nameCtx.fillText(name, 16, 42);
+      nameCard.update();
+      const namePlane = BABYLON.MeshBuilder.CreatePlane(`${name}_tag`, { width: 1.3, height: 0.35 }, scene);
+      namePlane.material = new BABYLON.StandardMaterial(`${name}_tagMat`, scene);
+      namePlane.material.diffuseTexture = nameCard;
+      namePlane.material.emissiveColor = new BABYLON.Color3(0.8, 0.9, 1);
+      namePlane.parent = head;
+      namePlane.position = new BABYLON.Vector3(0, -0.3, 0.45);
+
+      return root;
+    }
+
     // Create Scene
     const createScene = () => {
       scene = new BABYLON.Scene(engine);
@@ -440,6 +532,12 @@
 
       // MARKET STALL outside
       createMarket(scene);
+      createPetMarket(scene);
+
+      // Front garden luxuries
+      createTennisCourt(scene);
+      createBarbecue(scene);
+      createLimo(scene);
 
       // HOUSE SHELL + outside front door
       createHouseAndRooms(scene);
@@ -462,6 +560,10 @@
           else if (ev.code === "Digit7") selectItem("bookshelf");
           else if (ev.code === "KeyQ") rotateSelection(-Math.PI / 12);
           else if (ev.code === "KeyR") rotateSelection(Math.PI / 12);
+        } else if (petMarketOpen) {
+          if (ev.code === "Digit8") { selectPet("corgi"); adoptPet("corgi"); }
+          else if (ev.code === "Digit9") { selectPet("tuxedo"); adoptPet("tuxedo"); }
+          else if (ev.code === "Digit0") { selectPet("robo"); adoptPet("robo"); }
         }
       });
 
@@ -482,6 +584,10 @@
       scene.onBeforeRenderObservable.add(() => {
         updateInteractionTarget();
         advanceTime();
+        updatePetFollowers();
+        updateTennisGame();
+        updateBarbecue();
+        updateLimo();
       });
 
       // Start outside
@@ -489,6 +595,7 @@
       updateQuests();
       updateStats();
       updateMarketHint();
+      updatePetHint();
       log("Welcome back, decorator. Visit the stall to open the market.");
       return scene;
     };
@@ -523,6 +630,271 @@
       lantern.material = lanternMat;
       const lanternLight = new BABYLON.PointLight("lanternLight", lantern.position, scene);
       lanternLight.intensity = 1.1;
+    }
+
+    function createPetMarket(scene) {
+      const petStall = BABYLON.MeshBuilder.CreateBox("petStall", { width: 4.4, depth: 3, height: 2.1 }, scene);
+      petStall.position = new BABYLON.Vector3(-14, 1.05, -10);
+      petStall.material = createWoodMaterial("petStallMat", scene, new BABYLON.Color3(0.52, 0.38, 0.2), new BABYLON.Color3(0.3, 0.2, 0.12));
+      petStall.metadata = { interactable: true, type: "petMarket", label: "Pet Pavilion" };
+      petStall.checkCollisions = true;
+      interactables.push(petStall);
+
+      const canopy = BABYLON.MeshBuilder.CreateBox("petCanopy", { width: 5, depth: 3.6, height: 0.25 }, scene);
+      canopy.position = petStall.position.add(new BABYLON.Vector3(0, 1.2, 0));
+      canopy.material = createFabricMaterial("petCanopyMat", scene, new BABYLON.Color3(0.25, 0.62, 0.85), new BABYLON.Color3(0.18, 0.43, 0.7));
+
+      const sign = BABYLON.MeshBuilder.CreatePlane("petSign", { width: 3.6, height: 1.1 }, scene);
+      sign.position = petStall.position.add(new BABYLON.Vector3(0, 1.6, -1.6));
+      sign.rotation.x = Math.PI / 12;
+      const signTex = new BABYLON.DynamicTexture("petSignTex", { width: 512, height: 256 }, scene, false);
+      const ctx = signTex.getContext();
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, 512, 256);
+      ctx.fillStyle = "#e0f2fe";
+      ctx.font = "bold 60px Inter";
+      ctx.fillText("Adoptable Companions", 20, 120);
+      ctx.font = "32px Inter";
+      ctx.fillStyle = "#67e8f9";
+      ctx.fillText("Press 8/9/0 while open", 20, 190);
+      signTex.update();
+      sign.material = new BABYLON.StandardMaterial("petSignMat", scene);
+      sign.material.diffuseTexture = signTex;
+      sign.material.emissiveColor = new BABYLON.Color3(0.7, 0.9, 1);
+
+      const mascot = BABYLON.MeshBuilder.CreateSphere("petMascot", { diameter: 0.7 }, scene);
+      mascot.position = petStall.position.add(new BABYLON.Vector3(1.4, 1.1, 0));
+      mascot.material = createFabricMaterial("mascotMat", scene, new BABYLON.Color3(0.94, 0.94, 0.98), new BABYLON.Color3(0.46, 0.78, 0.96));
+    }
+
+    function selectPet(type) {
+      selectedPetType = type;
+      updatePetHint();
+    }
+
+    function adoptPet(type) {
+      const spec = PET_CATALOG[type];
+      if (!spec) return;
+      if (playerState.coins < spec.cost) {
+        interactionHintEl.textContent = "Not enough coins to adopt this companion.";
+        return;
+      }
+      const entered = prompt(`Name your ${spec.label}:`, spec.label) || spec.label;
+      const petMesh = createPetMesh(entered, spec, scene);
+      petMesh.position = camera.position.add(new BABYLON.Vector3(0.6, 0, 1.4));
+      adoptedPets.push({ name: entered, mesh: petMesh });
+      playerState.coins -= spec.cost;
+      updateStats();
+      log(`${entered} joined your estate. They will follow your lead.`);
+      updatePetHint();
+    }
+
+    function updatePetHint() {
+      if (!petMarketOpen) {
+        petHintEl.textContent = `Pet Market: approach the blue stall beside furniture to adopt companions. Owned: ${adoptedPets.length}`;
+        return;
+      }
+      let text = "Pet Market OPEN. 8 Corgi Pup, 9 Tuxedo Cat, 0 Robot Companion. Selection follows you immediately.";
+      if (selectedPetType) {
+        const pet = PET_CATALOG[selectedPetType];
+        text += ` Selected: ${pet.label} (${pet.cost} coins).`;
+      }
+      petHintEl.textContent = text;
+    }
+
+    function updatePetFollowers() {
+      if (!adoptedPets.length) return;
+      const forward = camera.getDirection(BABYLON.Axis.Z);
+      adoptedPets.forEach((pet, idx) => {
+        const target = camera.position.add(forward.scale(2 + idx * 0.8)).add(new BABYLON.Vector3(Math.sin(engine.getDeltaTime() * 0.001 * (idx + 1)) * 0.5, 0, (idx % 2 === 0 ? 1 : -1) * 0.6));
+        const current = pet.mesh.position.clone();
+        const lerped = BABYLON.Vector3.Lerp(current, target, 0.04);
+        pet.mesh.position = lerped;
+        pet.mesh.rotation.y = Math.atan2(forward.x, forward.z);
+      });
+    }
+
+    function createTennisCourt(scene) {
+      const tex = new BABYLON.DynamicTexture("courtTex", { width: 1024, height: 1024 }, scene, false);
+      const ctx = tex.getContext();
+      ctx.fillStyle = "#1b4332";
+      ctx.fillRect(0, 0, 1024, 1024);
+      ctx.strokeStyle = "#d8f3dc";
+      ctx.lineWidth = 10;
+      ctx.strokeRect(80, 80, 864, 864);
+      ctx.lineWidth = 6;
+      ctx.strokeRect(200, 80, 624, 864);
+      ctx.beginPath();
+      ctx.moveTo(512, 80);
+      ctx.lineTo(512, 944);
+      ctx.stroke();
+      tex.update();
+
+      const court = BABYLON.MeshBuilder.CreateGround("tennisCourt", { width: tennisState.courtSize.w, height: tennisState.courtSize.d }, scene);
+      court.material = new BABYLON.StandardMaterial("courtMat", scene);
+      court.material.diffuseTexture = tex;
+      court.material.specularColor = new BABYLON.Color3(0.04, 0.04, 0.04);
+      court.position = tennisState.center.clone();
+      court.checkCollisions = true;
+
+      const net = BABYLON.MeshBuilder.CreatePlane("tennisNet", { width: tennisState.courtSize.w, height: 1.4 }, scene);
+      net.position = tennisState.center.add(new BABYLON.Vector3(0, 0.7, 0));
+      net.rotation.x = Math.PI / 2;
+      net.material = createFabricMaterial("netMat", scene, new BABYLON.Color3(0.92, 0.94, 0.96), new BABYLON.Color3(0.12, 0.16, 0.2));
+
+      tennisState.bounds = {
+        minX: tennisState.center.x - tennisState.courtSize.w / 2 + 0.5,
+        maxX: tennisState.center.x + tennisState.courtSize.w / 2 - 0.5,
+        minZ: tennisState.center.z - tennisState.courtSize.d / 2 + 0.5,
+        maxZ: tennisState.center.z + tennisState.courtSize.d / 2 - 0.5
+      };
+
+      tennisState.opponent = BABYLON.MeshBuilder.CreateCapsule("tennisOpponent", { height: 1.8, radius: 0.35 }, scene);
+      tennisState.opponent.position = tennisState.center.add(new BABYLON.Vector3(0, 0.9, -tennisState.courtSize.d / 2 + 2));
+      tennisState.opponent.material = createFabricMaterial("tennisOpponentMat", scene, new BABYLON.Color3(0.36, 0.49, 0.78), new BABYLON.Color3(0.18, 0.24, 0.42));
+
+      const startSpot = BABYLON.MeshBuilder.CreateBox("tennisConsole", { width: 1.2, height: 1.1, depth: 0.8 }, scene);
+      startSpot.position = tennisState.center.add(new BABYLON.Vector3(-tennisState.courtSize.w / 2 - 1, 0.55, 0));
+      startSpot.material = createMetalMaterial("tennisConsoleMat", scene, new BABYLON.Color3(0.45, 0.58, 0.72));
+      startSpot.metadata = { interactable: true, type: "tennis", label: "Start a rally" };
+      interactables.push(startSpot);
+    }
+
+    function startTennisMatch() {
+      if (tennisState.playing) {
+        interactionHintEl.textContent = "You are already in a rally.";
+        return;
+      }
+      if (!tennisState.ball) {
+        tennisState.ball = BABYLON.MeshBuilder.CreateSphere("tennisBall", { diameter: 0.35 }, scene);
+        tennisState.ball.material = createFabricMaterial("tennisBallMat", scene, new BABYLON.Color3(0.96, 0.92, 0.3), new BABYLON.Color3(0.88, 0.8, 0.22));
+      }
+      tennisState.ball.position = tennisState.center.add(new BABYLON.Vector3(0, 1.2, 0));
+      tennisState.velocity = new BABYLON.Vector3(0.08, 0.22, 0.32);
+      tennisState.playing = true;
+      log("Serve! Rally with the NPC to earn bragging rights.");
+      interactionHintEl.textContent = "Tennis rally in progress. Watch the bounce!";
+    }
+
+    function updateTennisGame() {
+      if (!tennisState.playing || !tennisState.ball || !tennisState.bounds) return;
+      const dt = engine.getDeltaTime();
+      tennisState.ball.position.addInPlace(tennisState.velocity.scale(dt));
+      tennisState.velocity.y -= 0.0016 * dt;
+
+      const p = tennisState.ball.position;
+      if (p.y < 0.25) {
+        p.y = 0.25;
+        tennisState.velocity.y *= -0.7;
+      }
+      if (p.x < tennisState.bounds.minX || p.x > tennisState.bounds.maxX) {
+        tennisState.velocity.x *= -1;
+      }
+      if (p.z < tennisState.bounds.minZ || p.z > tennisState.bounds.maxZ) {
+        tennisState.velocity.z *= -1;
+      }
+
+      if (p.z < tennisState.center.z - tennisState.courtSize.d / 2 + 1) {
+        tennisState.velocity = new BABYLON.Vector3((Math.random() - 0.5) * 0.12, 0.24, 0.34);
+        log("Nice return! The NPC readies another shot.");
+      }
+      if (p.z > tennisState.center.z + tennisState.courtSize.d / 2 - 1) {
+        tennisState.velocity = new BABYLON.Vector3((Math.random() - 0.5) * 0.12, 0.24, -0.34);
+        tennisState.opponent.position.x = BABYLON.Scalar.Lerp(tennisState.opponent.position.x, p.x, 0.2);
+      }
+    }
+
+    function stopTennisMatch() {
+      tennisState.playing = false;
+      interactionHintEl.textContent = "";
+    }
+
+    function createBarbecue(scene) {
+      const grill = BABYLON.MeshBuilder.CreateCylinder("bbq", { diameter: 2.4, height: 0.7 }, scene);
+      grill.position = new BABYLON.Vector3(tennisState.center.x + 8, 0.35, tennisState.center.z - 3);
+      grill.material = createMetalMaterial("bbqMat", scene, new BABYLON.Color3(0.24, 0.28, 0.32));
+      grill.metadata = { interactable: true, type: "barbecue", label: "Ask the chef to grill" };
+      interactables.push(grill);
+      barbecueState.grill = grill;
+
+      const chef = BABYLON.MeshBuilder.CreateCapsule("bbqChef", { height: 1.8, radius: 0.35 }, scene);
+      chef.position = grill.position.add(new BABYLON.Vector3(-1.5, 0.9, -0.2));
+      chef.material = createFabricMaterial("chefMat", scene, new BABYLON.Color3(0.95, 0.9, 0.82), new BABYLON.Color3(0.82, 0.72, 0.62));
+      barbecueState.chef = chef;
+
+      const table = BABYLON.MeshBuilder.CreateBox("bbqTable", { width: 2.6, depth: 1.2, height: 0.6 }, scene);
+      table.position = grill.position.add(new BABYLON.Vector3(0, -0.05, 2.4));
+      table.material = createWoodMaterial("bbqTableMat", scene, new BABYLON.Color3(0.62, 0.46, 0.32), new BABYLON.Color3(0.42, 0.3, 0.22));
+    }
+
+    function startBarbecue() {
+      if (barbecueState.cooking) {
+        interactionHintEl.textContent = "The chef is already grilling.";
+        return;
+      }
+      barbecueState.cooking = true;
+      barbecueState.timer = 0;
+      interactionHintEl.textContent = "Chef NPC is grilling a feast...";
+      log("Chef fired up the grill. Expect fresh skewers soon.");
+    }
+
+    function updateBarbecue() {
+      if (!barbecueState.cooking) return;
+      barbecueState.timer += engine.getDeltaTime();
+      if (barbecueState.timer > 3500) {
+        barbecueState.cooking = false;
+        barbecueState.timer = 0;
+        if (barbecueState.platter) barbecueState.platter.dispose();
+        barbecueState.platter = BABYLON.MeshBuilder.CreateCylinder("bbqPlatter" + Math.random(), { diameter: 0.9, height: 0.08 }, scene);
+        barbecueState.platter.position = barbecueState.grill.position.add(new BABYLON.Vector3(0, 0.6, 0));
+        barbecueState.platter.material = createFabricMaterial("bbqPlatterMat" + Math.random(), scene, new BABYLON.Color3(0.94, 0.54, 0.36), new BABYLON.Color3(0.8, 0.32, 0.18));
+        playerState.coins += 8;
+        updateStats();
+        interactionHintEl.textContent = "Fresh barbecue served! +8 coins from guests.";
+        log("Guests paid for the barbecue spread. Coins earned.");
+      }
+    }
+
+    function createLimo(scene) {
+      const limo = BABYLON.MeshBuilder.CreateBox("limo", { width: 2.4, height: 1.6, depth: 8.2 }, scene);
+      limo.position = limoState.path[0].clone();
+      limo.material = createMetalMaterial("limoMat", scene, new BABYLON.Color3(0.12, 0.14, 0.18));
+      limo.checkCollisions = true;
+      limoState.body = limo;
+
+      const glass = BABYLON.MeshBuilder.CreateBox("limoGlass", { width: 2.2, height: 1, depth: 5 }, scene);
+      glass.parent = limo;
+      glass.position = new BABYLON.Vector3(0, 0.4, 0);
+      const glassMat = new BABYLON.StandardMaterial("glassMat", scene);
+      glassMat.diffuseColor = new BABYLON.Color3(0.2, 0.36, 0.5);
+      glassMat.alpha = 0.55;
+      glass.material = glassMat;
+
+      const driver = BABYLON.MeshBuilder.CreateCapsule("limoDriver", { height: 1.3, radius: 0.3 }, scene);
+      driver.parent = limo;
+      driver.position = new BABYLON.Vector3(0, 0.4, -2.2);
+      driver.material = createFabricMaterial("driverMat", scene, new BABYLON.Color3(0.8, 0.82, 0.88), new BABYLON.Color3(0.42, 0.56, 0.72));
+      limoState.driver = driver;
+
+      const beacon = BABYLON.MeshBuilder.CreateCylinder("limoBeacon", { diameter: 0.3, height: 0.2 }, scene);
+      beacon.parent = limo;
+      beacon.position = new BABYLON.Vector3(0, 0.9, 3.2);
+      const beaconMat = new BABYLON.StandardMaterial("beaconMat", scene);
+      beaconMat.emissiveColor = new BABYLON.Color3(0.95, 0.82, 0.3);
+      beacon.material = beaconMat;
+    }
+
+    function updateLimo() {
+      if (!limoState.body) return;
+      const path = limoState.path;
+      const seg = Math.floor(limoState.t) % path.length;
+      const next = (seg + 1) % path.length;
+      const alpha = limoState.t % 1;
+      const pos = BABYLON.Vector3.Lerp(path[seg], path[next], alpha);
+      limoState.body.position = pos;
+      const dir = path[next].subtract(path[seg]).normalize();
+      limoState.body.rotation.y = Math.atan2(dir.x, dir.z);
+      limoState.t = (limoState.t + limoState.speed * engine.getDeltaTime()) % path.length;
     }
 
     function createHouseAndRooms(scene) {
@@ -713,6 +1085,24 @@
         if (!marketOpen) selectedItemType = null;
         updateMarketHint();
         log(marketOpen ? "Market opened. Pick an item and click a floor." : "Market closed.");
+        return;
+      }
+
+      if (meta.type === "petMarket") {
+        petMarketOpen = !petMarketOpen;
+        if (!petMarketOpen) selectedPetType = null;
+        updatePetHint();
+        log(petMarketOpen ? "Pet pavilion open. Pick a companion with 8/9/0." : "Pet pavilion closed.");
+        return;
+      }
+
+      if (meta.type === "tennis") {
+        startTennisMatch();
+        return;
+      }
+
+      if (meta.type === "barbecue") {
+        startBarbecue();
         return;
       }
 
