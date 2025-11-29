@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D House Decorating – Babylon.js Prototype</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      font-family: system-ui, sans-serif;
+      color: #fff;
+    }
+    #renderCanvas {
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      display: block;
+    }
+    #hud {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.4);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      max-width: 320px;
+    }
+    #hud strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    #interactionHint {
+      margin-top: 6px;
+      color: #ffd66b;
+    }
+    #marketHint {
+      margin-top: 6px;
+      color: #6bffb2;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="hud">
+    <strong>3D House Decorating Prototype (Babylon.js)</strong>
+    <div id="roomInfo">Room: Outside</div>
+    <div>Controls: WASD to move, mouse to look, Space to jump.</div>
+    <div>Press <b>E</b> to interact (doors, stairs, stall, sofa, oven).</div>
+    <div>Press <b>M</b> to mark current room "Done" (unlock next room/stairs).</div>
+    <div id="interactionHint"></div>
+    <div id="marketHint"></div>
+  </div>
+
+  <!-- Babylon.js CDN -->
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script>
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true);
+
+    // Simple DOM HUD references
+    const roomInfoEl = document.getElementById("roomInfo");
+    const interactionHintEl = document.getElementById("interactionHint");
+    const marketHintEl = document.getElementById("marketHint");
+
+    // Room indices: -1 = outside, 0–3 = ground floor rooms, 4–6 = upstairs rooms
+    let currentRoomIndex = -1;
+
+    // Room progression state
+    const NUM_ROOMS = 7;
+    const roomStates = [];
+    for (let i = 0; i < NUM_ROOMS; i++) {
+      roomStates.push({
+        done: false,
+        unlocked: i === 0   // first room unlocked by default
+      });
+    }
+
+    // Interaction state
+    let currentInteractable = null;
+    let marketOpen = false;
+    let selectedItemType = null; // "sofa" | "table" | "oven"
+    let sitting = false;
+    let savedCameraForSitting = null;
+
+    // For ray picking when placing items
+    let scene, camera;
+    let interactables = []; // meshes with .metadata.interactable
+    let furnitureByRoom = {}; // roomIndex -> [mesh,...]
+
+    // Create Scene
+    const createScene = () => {
+      scene = new BABYLON.Scene(engine);
+      scene.gravity = new BABYLON.Vector3(0, -0.3, 0);
+      scene.collisionsEnabled = true;
+
+      // Camera (first-person-ish)
+      camera = new BABYLON.UniversalCamera("camera",
+        new BABYLON.Vector3(0, 2, -20), scene);
+      camera.attachControl(canvas, true);
+      camera.speed = 0.4;
+      camera.angularSensibility = 500;
+      camera.ellipsoid = new BABYLON.Vector3(1, 1, 1.5);
+      camera.checkCollisions = true;
+      camera.applyGravity = true;
+      camera.minZ = 0.1;
+
+      camera.keysUp = [87];   // W
+      camera.keysDown = [83]; // S
+      camera.keysLeft = [65]; // A
+      camera.keysRight = [68];// D
+
+      // Simple light + environment
+      const light = new BABYLON.HemisphericLight("light",
+        new BABYLON.Vector3(0, 1, 0), scene);
+      light.intensity = 0.9;
+
+      const dirLight = new BABYLON.DirectionalLight("dirLight",
+        new BABYLON.Vector3(-0.5, -1, 0.5), scene);
+      dirLight.position = new BABYLON.Vector3(20, 40, -20);
+      dirLight.intensity = 0.6;
+
+      // Ground (outside)
+      const ground = BABYLON.MeshBuilder.CreateGround("ground",
+        { width: 80, height: 80 }, scene);
+      ground.position.y = 0;
+      ground.checkCollisions = true;
+      const groundMat = new BABYLON.StandardMaterial("groundMat", scene);
+      groundMat.diffuseColor = new BABYLON.Color3(0.2, 0.5, 0.2);
+      ground.material = groundMat;
+
+      // Skybox-ish dome
+      const sky = BABYLON.MeshBuilder.CreateSphere("sky",
+        { diameter: 200, sideOrientation: BABYLON.Mesh.BACKSIDE }, scene);
+      const skyMat = new BABYLON.StandardMaterial("skyMat", scene);
+      skyMat.diffuseColor = new BABYLON.Color3(0.4, 0.6, 0.9);
+      skyMat.specularColor = new BABYLON.Color3(0, 0, 0);
+      sky.material = skyMat;
+
+      // MARKET STALL outside
+      const stall = BABYLON.MeshBuilder.CreateBox("marketStall",
+        { width: 4, depth: 3, height: 2 }, scene);
+      stall.position = new BABYLON.Vector3(-8, 1, -10);
+      const stallMat = new BABYLON.StandardMaterial("stallMat", scene);
+      stallMat.diffuseColor = new BABYLON.Color3(0.8, 0.6, 0.2);
+      stall.material = stallMat;
+      stall.checkCollisions = true;
+      stall.metadata = {
+        interactable: true,
+        type: "market",
+        label: "Market Stall"
+      };
+      interactables.push(stall);
+
+      const stallRoof = BABYLON.MeshBuilder.CreateBox("stallRoof",
+        { width: 4.2, depth: 3.2, height: 0.3 }, scene);
+      stallRoof.position = stall.position.add(new BABYLON.Vector3(0, 1.2, 0));
+      const roofMat = new BABYLON.StandardMaterial("roofMat", scene);
+      roofMat.diffuseColor = new BABYLON.Color3(0.9, 0.2, 0.2);
+      stallRoof.material = roofMat;
+
+      // HOUSE SHELL + outside front door
+      createHouseAndRooms(scene);
+
+      // Keyboard events
+      window.addEventListener("keydown", (ev) => {
+        if (ev.code === "KeyE") {
+          handleInteract();
+        } else if (ev.code === "KeyM") {
+          handleMarkRoomDone();
+        } else if (marketOpen) {
+          if (ev.code === "Digit1") {
+            selectedItemType = "sofa";
+            updateMarketHint();
+          } else if (ev.code === "Digit2") {
+            selectedItemType = "table";
+            updateMarketHint();
+          } else if (ev.code === "Digit3") {
+            selectedItemType = "oven";
+            updateMarketHint();
+          }
+        }
+      });
+
+      // Mouse click for placing furniture
+      scene.onPointerObservable.add((pointerInfo) => {
+        if (!marketOpen || !selectedItemType) return;
+        if (pointerInfo.type === BABYLON.PointerEventTypes.POINTERDOWN) {
+          const pickResult = pointerInfo.pickInfo;
+          if (pickResult && pickResult.hit && pickResult.pickedMesh) {
+            // Place only on room floors
+            if (pickResult.pickedMesh.metadata &&
+                pickResult.pickedMesh.metadata.isRoomFloor) {
+              placeFurniture(currentRoomIndex, selectedItemType, pickResult.pickedPoint);
+            }
+          }
+        }
+      });
+
+      // Main update loop for interactions
+      scene.onBeforeRenderObservable.add(() => {
+        updateInteractionTarget();
+      });
+
+      // Start outside
+      setCurrentRoom(-1);
+      return scene;
+    };
+
+    function createHouseAndRooms(scene) {
+      // House "box" around rooms (just a visual shell)
+      const houseFloorY = 0.01;
+      const houseWidth = 40;
+      const houseDepth = 40;
+
+      const houseGround = BABYLON.MeshBuilder.CreateGround("houseGround",
+        { width: houseWidth, height: houseDepth }, scene);
+      houseGround.position = new BABYLON.Vector3(0, houseFloorY, 10);
+      const houseGroundMat = new BABYLON.StandardMaterial("houseGroundMat", scene);
+      houseGroundMat.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.9);
+      houseGround.material = houseGroundMat;
+      houseGround.checkCollisions = true;
+
+      // Outer walls
+      function createWall(name, w, h, d, pos, scene) {
+        const wall = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+        wall.position = pos;
+        const mat = new BABYLON.StandardMaterial(name + "Mat", scene);
+        mat.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.9);
+        wall.material = mat;
+        wall.checkCollisions = true;
+        return wall;
+      }
+
+      const wallHeight = 4;
+      // Back wall
+      createWall("backWall", houseWidth, wallHeight, 0.5,
+        new BABYLON.Vector3(0, wallHeight / 2, 10 + houseDepth / 2), scene);
+      // Front wall (with gap for door)
+      const frontWallLeft = createWall("frontWallLeft", houseWidth / 2 - 2, wallHeight, 0.5,
+        new BABYLON.Vector3(-houseWidth / 4 - 2, wallHeight / 2, 10 - houseDepth / 2), scene);
+      const frontWallRight = createWall("frontWallRight", houseWidth / 2 - 2, wallHeight, 0.5,
+        new BABYLON.Vector3(houseWidth / 4 + 2, wallHeight / 2, 10 - houseDepth / 2), scene);
+
+      // Side walls
+      createWall("leftWall", 0.5, wallHeight, houseDepth,
+        new BABYLON.Vector3(-houseWidth / 2, wallHeight / 2, 10), scene);
+      createWall("rightWall", 0.5, wallHeight, houseDepth,
+        new BABYLON.Vector3(houseWidth / 2, wallHeight / 2, 10), scene);
+
+      // Simple flat "ceiling"
+      const ceiling = BABYLON.MeshBuilder.CreateGround("ceiling",
+        { width: houseWidth, height: houseDepth }, scene);
+      ceiling.position = new BABYLON.Vector3(0, wallHeight + 0.01, 10);
+      ceiling.rotation.x = Math.PI;
+      const ceilingMat = new BABYLON.StandardMaterial("ceilingMat", scene);
+      ceilingMat.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.98);
+      ceiling.material = ceilingMat;
+
+      // Front door (outside -> room 0)
+      const frontDoor = BABYLON.MeshBuilder.CreateBox("frontDoor",
+        { width: 2, height: 3, depth: 0.3 }, scene);
+      frontDoor.position = new BABYLON.Vector3(0, 1.5, 10 - houseDepth / 2 + 0.3);
+      const doorMat = new BABYLON.StandardMaterial("frontDoorMat", scene);
+      doorMat.diffuseColor = new BABYLON.Color3(0.5, 0.3, 0.1);
+      frontDoor.material = doorMat;
+      frontDoor.metadata = {
+        interactable: true,
+        type: "door",
+        label: "Front Door",
+        fromRoom: -1,
+        toRoom: 0
+      };
+      interactables.push(frontDoor);
+
+      // Create 7 rooms inside the house
+      // Layout: 4 ground floor rooms in a row, 3 upstairs in a row above
+      const roomSize = 8;
+      const corridorZ = 10; // house center z
+
+      for (let i = 0; i < NUM_ROOMS; i++) {
+        const floorIndex = i < 4 ? 0 : 1;
+        const indexOnFloor = i < 4 ? i : i - 4;
+
+        const roomCenterX = -12 + indexOnFloor * (roomSize + 1);
+        const roomCenterY = floorIndex === 0 ? 0.02 : 4.02;
+        const roomCenterZ = corridorZ;
+
+        // Floor
+        const floor = BABYLON.MeshBuilder.CreateGround("roomFloor_" + i,
+          { width: roomSize, height: roomSize }, scene);
+        floor.position = new BABYLON.Vector3(roomCenterX, roomCenterY, roomCenterZ);
+        const floorMat = new BABYLON.StandardMaterial("floorMat_" + i, scene);
+        floorMat.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.95);
+        floor.material = floorMat;
+        floor.checkCollisions = true;
+        floor.metadata = { isRoomFloor: true, roomIndex: i };
+
+        // Simple walls around the floor (4 per room, with a gap for door)
+        const half = roomSize / 2;
+        const wallH = 3.8;
+
+        // back wall
+        createRoomWall("roomBack_" + i,
+          roomSize, wallH, 0.2,
+          new BABYLON.Vector3(roomCenterX, roomCenterY + wallH / 2, roomCenterZ + half),
+          scene);
+
+        // front wall (gap in middle for internal door)
+        const frontLeft = createRoomWall("roomFrontLeft_" + i,
+          roomSize / 2 - 1, wallH, 0.2,
+          new BABYLON.Vector3(roomCenterX - (roomSize / 4 + 0.5), roomCenterY + wallH / 2, roomCenterZ - half),
+          scene);
+        const frontRight = createRoomWall("roomFrontRight_" + i,
+          roomSize / 2 - 1, wallH, 0.2,
+          new BABYLON.Vector3(roomCenterX + (roomSize / 4 + 0.5), roomCenterY + wallH / 2, roomCenterZ - half),
+          scene);
+
+        // left wall
+        createRoomWall("roomLeft_" + i,
+          0.2, wallH, roomSize,
+          new BABYLON.Vector3(roomCenterX - half, roomCenterY + wallH / 2, roomCenterZ),
+          scene);
+
+        // right wall
+        createRoomWall("roomRight_" + i,
+          0.2, wallH, roomSize,
+          new BABYLON.Vector3(roomCenterX + half, roomCenterY + wallH / 2, roomCenterZ),
+          scene);
+
+        // Doors between rooms:
+        // forward door: to next room (except room 3 uses stairs, and 6 is last)
+        if (i < NUM_ROOMS - 1) {
+          if (i === 3) {
+            // stairs instead of forward door (up to room 4)
+            const stairs = BABYLON.MeshBuilder.CreateBox("stairs_" + i,
+              { width: 2, height: 1, depth: 3 }, scene);
+            stairs.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 0.5, roomCenterZ - half + 1.5);
+            const stairsMat = new BABYLON.StandardMaterial("stairsMat_" + i, scene);
+            stairsMat.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.6);
+            stairs.material = stairsMat;
+            stairs.metadata = {
+              interactable: true,
+              type: "stairs",
+              label: "Stairs Up",
+              fromRoom: i,
+              toRoom: i + 1
+            };
+            interactables.push(stairs);
+            stairs.setEnabled(false); // locked until room 3 is done
+          } else {
+            const door = BABYLON.MeshBuilder.CreateBox("roomDoorForward_" + i,
+              { width: 1.4, height: 2.5, depth: 0.3 }, scene);
+            door.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 1.3, roomCenterZ - half + 0.2);
+            const mat = new BABYLON.StandardMaterial("roomDoorForwardMat_" + i, scene);
+            mat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2);
+            door.material = mat;
+            door.metadata = {
+              interactable: true,
+              type: "doorRoom",
+              label: "Door to next room",
+              fromRoom: i,
+              toRoom: i + 1
+            };
+            interactables.push(door);
+            door.setEnabled(false); // locked until room i is done
+          }
+        }
+
+        // backward door for going back (except room 0 which goes to outside via front door)
+        if (i > 0) {
+          const backDoor = BABYLON.MeshBuilder.CreateBox("roomDoorBack_" + i,
+            { width: 1.4, height: 2.5, depth: 0.3 }, scene);
+          backDoor.position = new BABYLON.Vector3(roomCenterX, roomCenterY + 1.3, roomCenterZ + half - 0.2);
+          const mat2 = new BABYLON.StandardMaterial("roomDoorBackMat_" + i, scene);
+          mat2.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2);
+          backDoor.material = mat2;
+          backDoor.metadata = {
+            interactable: true,
+            type: "doorRoom",
+            label: "Door to previous room",
+            fromRoom: i,
+            toRoom: i - 1
+          };
+          interactables.push(backDoor);
+        }
+
+        furnitureByRoom[i] = [];
+      }
+    }
+
+    function createRoomWall(name, w, h, d, pos, scene) {
+      const wall = BABYLON.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+      wall.position = pos;
+      const wallMat = new BABYLON.StandardMaterial(name + "Mat", scene);
+      wallMat.diffuseColor = new BABYLON.Color3(0.92, 0.92, 0.96);
+      wall.material = wallMat;
+      wall.checkCollisions = true;
+      return wall;
+    }
+
+    function setCurrentRoom(index) {
+      currentRoomIndex = index;
+      if (index === -1) {
+        roomInfoEl.textContent = "Room: Outside (yard & market stall)";
+      } else {
+        const floor = index < 4 ? 1 : 2;
+        const onFloorIndex = index < 4 ? index + 1 : index - 4 + 1;
+        roomInfoEl.textContent = `Room ${index + 1} of ${NUM_ROOMS} (Floor ${floor}, Room ${onFloorIndex} on this floor)`;
+      }
+      updateMarketHint();
+      interactionHintEl.textContent = "";
+    }
+
+    function teleportToRoom(roomIndex) {
+      // Move camera to a reasonable spawn position for given room
+      if (roomIndex === -1) {
+        camera.position = new BABYLON.Vector3(0, 2, -20);
+        setCurrentRoom(-1);
+        return;
+      }
+
+      const floorIndex = roomIndex < 4 ? 0 : 1;
+      const indexOnFloor = roomIndex < 4 ? roomIndex : roomIndex - 4;
+      const roomCenterX = -12 + indexOnFloor * (8 + 1);
+      const roomCenterY = floorIndex === 0 ? 1.8 : 5.8;
+      const roomCenterZ = 10;
+
+      camera.position = new BABYLON.Vector3(roomCenterX, roomCenterY, roomCenterZ + 2.5);
+      setCurrentRoom(roomIndex);
+    }
+
+    function updateInteractionTarget() {
+      currentInteractable = null;
+      interactionHintEl.textContent = "";
+
+      const playerPos = camera.position;
+
+      let best = null;
+      let bestDist = Infinity;
+
+      interactables.forEach(mesh => {
+        if (!mesh.isEnabled()) return;
+        const mpos = mesh.position;
+        const dist = BABYLON.Vector3.Distance(playerPos, mpos);
+        if (dist < 4 && dist < bestDist) {
+          best = mesh;
+          bestDist = dist;
+        }
+      });
+
+      if (best) {
+        currentInteractable = best;
+        const meta = best.metadata || {};
+        let msg = `Press E to interact`;
+        if (meta.label) msg += ` (${meta.label})`;
+        interactionHintEl.textContent = msg;
+      }
+    }
+
+    function handleInteract() {
+      if (sitting && savedCameraForSitting) {
+        // stand up
+        camera.position = savedCameraForSitting.position.clone();
+        camera.rotation = savedCameraForSitting.rotation.clone();
+        camera.speed = 0.4;
+        sitting = false;
+        savedCameraForSitting = null;
+        interactionHintEl.textContent = "";
+        return;
+      }
+
+      if (!currentInteractable) return;
+      const meta = currentInteractable.metadata || {};
+
+      if (meta.type === "market") {
+        marketOpen = !marketOpen;
+        if (!marketOpen) selectedItemType = null;
+        updateMarketHint();
+        return;
+      }
+
+      if (meta.type === "door") {
+        // front door (outside <-> room 0)
+        if (currentRoomIndex === -1 && meta.toRoom === 0 && roomStates[0].unlocked) {
+          teleportToRoom(0);
+        } else if (currentRoomIndex === 0 && meta.toRoom === -1) {
+          teleportToRoom(-1);
+        }
+        return;
+      }
+
+      if (meta.type === "doorRoom") {
+        const to = meta.toRoom;
+        // only forward if target room is unlocked; backward is always allowed
+        if (to > currentRoomIndex && !roomStates[to].unlocked) {
+          interactionHintEl.textContent = "You haven't unlocked the next room yet.";
+          return;
+        }
+        teleportToRoom(to);
+        return;
+      }
+
+      if (meta.type === "stairs") {
+        const to = meta.toRoom;
+        if (!roomStates[to].unlocked) {
+          interactionHintEl.textContent = "You haven't unlocked the upstairs yet.";
+          return;
+        }
+        teleportToRoom(to);
+        return;
+      }
+
+      if (meta.type === "sofa") {
+        // Sit on sofa: save camera state, move to a sit position, lower height and stop moving
+        if (!sitting) {
+          savedCameraForSitting = {
+            position: camera.position.clone(),
+            rotation: camera.rotation.clone()
+          };
+          const forward = new BABYLON.Vector3(0, 0, -1);
+          const sofaForward = forward; // simple assumption
+          const seatPos = currentInteractable.position.add(sofaForward.scale(-0.5));
+          seatPos.y = currentInteractable.position.y + 1;
+          camera.position = seatPos;
+          camera.rotation.x = 0;
+          camera.rotation.y = currentInteractable.rotation.y;
+          camera.speed = 0; // no movement while sitting
+          sitting = true;
+          interactionHintEl.textContent = "Sitting on sofa. Press E to stand up.";
+        }
+        return;
+      }
+
+      if (meta.type === "oven") {
+        // Simple "cook" effect: change color briefly
+        const mat = currentInteractable.material;
+        const originalColor = mat.diffuseColor.clone();
+        mat.diffuseColor = new BABYLON.Color3(1, 0.4, 0.1);
+        interactionHintEl.textContent = "You use the oven. Something delicious is cooking...";
+        setTimeout(() => {
+          mat.diffuseColor = originalColor;
+          interactionHintEl.textContent = "";
+        }, 2000);
+        return;
+      }
+    }
+
+    function handleMarkRoomDone() {
+      if (currentRoomIndex < 0) {
+        interactionHintEl.textContent = "You must be inside a room to mark it done.";
+        return;
+      }
+      const idx = currentRoomIndex;
+      roomStates[idx].done = true;
+      interactionHintEl.textContent = `Room ${idx + 1} marked as done.`;
+
+      // Unlock next room / stairs
+      if (idx < NUM_ROOMS - 1) {
+        roomStates[idx + 1].unlocked = true;
+      }
+
+      // Enable corresponding forward door / stairs mesh
+      const forwardDoorName = idx === 3 ? "stairs_" + idx : "roomDoorForward_" + idx;
+      const mesh = scene.getMeshByName(forwardDoorName);
+      if (mesh) mesh.setEnabled(true);
+    }
+
+    function updateMarketHint() {
+      if (!marketOpen) {
+        marketHintEl.textContent = "Market: walk to the stall outside and press E to open.";
+        return;
+      }
+      let text = "Market OPEN. Press 1=sofa, 2=table, 3=oven. Click room floor to place.";
+      if (selectedItemType) {
+        text += ` Selected: ${selectedItemType}.`;
+      }
+      marketHintEl.textContent = text;
+    }
+
+    function placeFurniture(roomIndex, type, position) {
+      if (roomIndex < 0) {
+        interactionHintEl.textContent = "You can only place furniture inside rooms.";
+        return;
+      }
+      let mesh;
+      const y = position.y + 0.5;
+
+      if (type === "sofa") {
+        mesh = BABYLON.MeshBuilder.CreateBox("sofa", { width: 2.2, depth: 1, height: 1 }, scene);
+        const mat = new BABYLON.StandardMaterial("sofaMat", scene);
+        mat.diffuseColor = new BABYLON.Color3(0.6, 0.2, 0.6);
+        mesh.material = mat;
+        mesh.metadata = { type: "sofa", interactable: true, label: "Sofa" };
+      } else if (type === "table") {
+        mesh = BABYLON.MeshBuilder.CreateBox("table", { width: 1.5, depth: 1.5, height: 0.8 }, scene);
+        const mat = new BABYLON.StandardMaterial("tableMat", scene);
+        mat.diffuseColor = new BABYLON.Color3(0.6, 0.4, 0.2);
+        mesh.material = mat;
+        // Not interactable beyond decoration (no words)
+      } else if (type === "oven") {
+        mesh = BABYLON.MeshBuilder.CreateBox("oven", { width: 1, depth: 1, height: 1.4 }, scene);
+        const mat = new BABYLON.StandardMaterial("ovenMat", scene);
+        mat.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+        mesh.material = mat;
+        mesh.metadata = { type: "oven", interactable: true, label: "Oven" };
+      } else {
+        return;
+      }
+
+      mesh.position = new BABYLON.Vector3(position.x, y, position.z);
+      mesh.checkCollisions = true;
+
+      if (mesh.metadata && mesh.metadata.interactable) {
+        interactables.push(mesh);
+      }
+      furnitureByRoom[roomIndex].push(mesh);
+    }
+
+    const sceneInstance = createScene();
+
+    engine.runRenderLoop(() => {
+      sceneInstance.render();
+    });
+
+    window.addEventListener("resize", () => {
+      engine.resize();
+    });
+  </script>
+</body>
+</html>
